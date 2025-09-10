@@ -88,8 +88,8 @@ function fmt(n){ return Number(n).toLocaleString('fr-FR'); }
 function now(){ return new Date().toLocaleTimeString('fr-FR'); }
 function paintStatus(s){
   statusEl.classList.remove('ok','warn','bad');
-  if(s==='Completed') statusEl.classList.add('ok');
-  else if(s==='Pending'||s==='In progress') statusEl.classList.add('warn');
+  if(s==='Terminé') statusEl.classList.add('ok');
+  else if(s==='En attente'||s==='En cours') statusEl.classList.add('warn');
   else statusEl.classList.add('bad');
   statusEl.textContent = s || '—';
 }
