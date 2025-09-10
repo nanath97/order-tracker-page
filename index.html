@@ -1,32 +1,79 @@
 <!doctype html>
 <html lang="fr"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Suivi de commande – MassDM</title>
+<title>Suivi de commande</title>
 <style>
-  body{font-family:sans-serif;background:#0b1020;color:#e9edf4;margin:0}
-  .wrap{max-width:700px;margin:40px auto;padding:20px}
-  .card{background:#121a33;border:1px solid #22305f;border-radius:16px;padding:20px}
-  h1{margin:0 0 10px;font-size:24px}
-  form{display:grid;gap:12px;grid-template-columns:1fr 1fr;align-items:end}
-  input,button{padding:10px;border-radius:8px;border:1px solid #2c3a6b;background:#0f1630;color:#fff}
-  button{cursor:pointer;font-weight:bold}
-  .progress{margin-top:15px;height:14px;background:#1a2447;border-radius:8px;overflow:hidden}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#e9edf4;margin:0}
+  .wrap{max-width:720px;margin:40px auto;padding:20px}
+  .card{background:#121a33;border:1px solid #22305f;border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+  h1{margin:0 0 8px;font-size:26px}
+  p.sub{margin:0 0 16px;opacity:.8}
+  form{display:grid;gap:12px;grid-template-columns:1fr auto;align-items:end}
+  input,button,select{padding:10px;border-radius:10px;border:1px solid #2c3a6b;background:#0f1630;color:#e9edf4}
+  button{cursor:pointer;font-weight:700}
+  .progress{margin:14px 0;height:12px;background:#1a2447;border-radius:8px;overflow:hidden}
   .bar{height:100%;width:0%;background:linear-gradient(90deg,#68c4ff,#7df7c5);transition:width .6s}
-  .out{margin-top:15px;padding:12px;background:#0f1630;border-radius:8px;font-size:14px;white-space:pre-wrap}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+  .k{opacity:.8;font-size:13px}.v{font-size:16px;font-weight:600}
+  .muted{opacity:.65;font-size:12px;margin-top:8px;line-height:1.5}
+  .notice{margin-top:16px;padding:12px;border-radius:12px;background:#0f1630;border:1px solid #2c3a6b}
+  .ok{color:#7df7c5}.warn{color:#ffaa40}.bad{color:#ff6b6b}
 </style>
-</head><body>
-<div class="wrap"><div class="card">
-  <h1>Suivi de commande</h1>
-  <form id="f">
-    <input id="oid" type="number" placeholder="ID commande (ex: 23501)" required>
-    <input id="qty" type="number" placeholder="Quantité totale (ex: 100000)" required>
-    <button type="submit">Vérifier</button>
-  </form>
-  <div class="progress"><div class="bar" id="bar"></div></div>
-  <pre id="out">—</pre>
-</div></div>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Suivi de commande</h1>
+      <p class="sub">Saisissez l’ID communiqué pour voir l’avancement en temps réel.</p>
+
+      <form id="f">
+        <input id="oid" type="number" placeholder="ID commande (ex: 5416)" required>
+        <div style="display:grid;grid-template-columns:auto auto;gap:8px;align-items:center">
+          <button type="submit">Vérifier</button>
+          <select id="auto" title="Auto-refresh">
+            <option value="0">Manuel</option>
+            <option value="15">↻ 15 s</option>
+            <option value="30" selected>↻ 30 s</option>
+            <option value="60">↻ 60 s</option>
+          </select>
+        </div>
+      </form>
+
+      <div class="progress"><div class="bar" id="bar"></div></div>
+
+      <div class="grid">
+        <div><div class="k">Statut</div><div class="v" id="status">—</div></div>
+        <div><div class="k">Dernière mise à jour</div><div class="v" id="ts">—</div></div>
+      </div>
+      <div class="grid">
+        <div><div class="k">Livré</div><div class="v" id="deliv">—</div></div>
+        <div><div class="k">Restant</div><div class="v" id="rem">—</div></div>
+      </div>
+
+      <div class="notice">
+        <strong>Important :</strong> ce service génère un <em>trafic d’influence</em> important.
+        Les résultats (visites, DM, achats) dépendent aussi de votre <strong>tunnel de vente</strong> :
+        qualité du profil Instagram (bio, highlights, preuves), <strong>appel à l’action clair</strong>,
+        offre percutante, et réactivité en message privé. Un bon funnel maximise la conversion.
+      </div>
+
+      <p class="muted">Astuce : si la page n’évolue pas, cliquez à nouveau sur <b>Vérifier</b> ou activez l’auto-refresh.</p>
+    </div>
+  </div>
+
 <script>
-const WORKER_URL = "https://order-tracker.vinteo-ac.workers.dev";
+const WORKER_URL = "https://order-tracker.vinteo-ac.workers.dev"; // ton Worker
+let Q = 100000; // ⚠️ quantité totale fixée côté page (modifie ici pour ta campagne)
+
+const f = document.getElementById('f');
+const oid = document.getElementById('oid');
+const auto = document.getElementById('auto');
+const bar = document.getElementById('bar');
+const statusEl = document.getElementById('status');
+const tsEl = document.getElementById('ts');
+const delivEl = document.getElementById('deliv');
+const remEl = document.getElementById('rem');
+let timer = null;
 
 async function query(orderId){
   const r = await fetch(WORKER_URL,{
@@ -34,32 +81,45 @@ async function query(orderId){
     headers:{ "content-type":"application/json" },
     body: JSON.stringify({ action:"status", order: orderId })
   });
+  if(!r.ok) throw new Error("HTTP "+r.status);
   return await r.json();
 }
+function fmt(n){ return Number(n).toLocaleString('fr-FR'); }
+function now(){ return new Date().toLocaleTimeString('fr-FR'); }
+function paintStatus(s){
+  statusEl.classList.remove('ok','warn','bad');
+  if(s==='Completed') statusEl.classList.add('ok');
+  else if(s==='Pending'||s==='In progress') statusEl.classList.add('warn');
+  else statusEl.classList.add('bad');
+  statusEl.textContent = s || '—';
+}
+function updateUI(data){
+  const remains = Number(data.remains||0);
+  const delivered = Math.max(0, Q - remains);
+  const pct = Math.max(0, Math.min(100, Math.round(delivered / Q * 100)));
+  paintStatus(data.status||'Unknown');
+  tsEl.textContent = now();
+  delivEl.textContent = `${fmt(delivered)} / ${fmt(Q)} (~${pct}%)`;
+  remEl.textContent = fmt(remains);
+  bar.style.width = pct + "%";
+}
+async function runOnce(){
+  const orderId = Number(oid.value);
+  if(!orderId) return;
+  try{ updateUI(await query(orderId)); }
+  catch(e){ paintStatus('Erreur'); tsEl.textContent = now(); delivEl.textContent='—'; remEl.textContent='—'; bar.style.width='0%'; }
+}
+function handleAuto(){
+  if(timer){ clearInterval(timer); timer = null; }
+  const sec = Number(auto.value);
+  if(sec>0){ timer = setInterval(runOnce, sec*1000); }
+}
+f.addEventListener('submit', e=>{ e.preventDefault(); runOnce(); handleAuto(); });
+auto.addEventListener('change', handleAuto);
 
-document.getElementById('f').addEventListener('submit', async e=>{
-  e.preventDefault();
-  const oid = Number(document.getElementById('oid').value);
-  const Q   = Number(document.getElementById('qty').value);
-  const out = document.getElementById('out');
-  const bar = document.getElementById('bar');
-  try{
-    const data = await query(oid);
-    const remains   = Number(data.remains||0);
-    const delivered = Q - remains;
-    const pct = Q? Math.max(0,Math.min(100,Math.round(delivered/Q*100))) : 0;
-    bar.style.width = pct + "%";
-    out.textContent =
-`Statut: ${data.status}
-Livré: ${delivered}/${Q} (~${pct}%)
-Restant: ${remains}
-Coût: ${data.charge||'—'} ${data.currency||''}
-
-Réponse brute:
-` + JSON.stringify(data,null,2);
-  }catch(err){
-    out.textContent = "Erreur: " + err.message;
-  }
-});
+// Option: permettre Q via URL ?id=5416&qty=100000
+const url = new URL(location.href);
+if(url.searchParams.get('qty')){ Q = Number(url.searchParams.get('qty'))||Q; }
+if(url.searchParams.get('id')){ oid.value = url.searchParams.get('id'); }
 </script>
 </body></html>
