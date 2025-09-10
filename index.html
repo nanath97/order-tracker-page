@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Suivi de commande – MassDM</title>
+<style>
+  body{font-family:sans-serif;background:#0b1020;color:#e9edf4;margin:0}
+  .wrap{max-width:700px;margin:40px auto;padding:20px}
+  .card{background:#121a33;border:1px solid #22305f;border-radius:16px;padding:20px}
+  h1{margin:0 0 10px;font-size:24px}
+  form{display:grid;gap:12px;grid-template-columns:1fr 1fr;align-items:end}
+  input,button{padding:10px;border-radius:8px;border:1px solid #2c3a6b;background:#0f1630;color:#fff}
+  button{cursor:pointer;font-weight:bold}
+  .progress{margin-top:15px;height:14px;background:#1a2447;border-radius:8px;overflow:hidden}
+  .bar{height:100%;width:0%;background:linear-gradient(90deg,#68c4ff,#7df7c5);transition:width .6s}
+  .out{margin-top:15px;padding:12px;background:#0f1630;border-radius:8px;font-size:14px;white-space:pre-wrap}
+</style>
+</head><body>
+<div class="wrap"><div class="card">
+  <h1>Suivi de commande</h1>
+  <form id="f">
+    <input id="oid" type="number" placeholder="ID commande (ex: 23501)" required>
+    <input id="qty" type="number" placeholder="Quantité totale (ex: 100000)" required>
+    <button type="submit">Vérifier</button>
+  </form>
+  <div class="progress"><div class="bar" id="bar"></div></div>
+  <pre id="out">—</pre>
+</div></div>
+<script>
+const WORKER_URL = "https://order-tracker.vinteo-ac.workers.dev";
+
+async function query(orderId){
+  const r = await fetch(WORKER_URL,{
+    method:"POST",
+    headers:{ "content-type":"application/json" },
+    body: JSON.stringify({ action:"status", order: orderId })
+  });
+  return await r.json();
+}
+
+document.getElementById('f').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const oid = Number(document.getElementById('oid').value);
+  const Q   = Number(document.getElementById('qty').value);
+  const out = document.getElementById('out');
+  const bar = document.getElementById('bar');
+  try{
+    const data = await query(oid);
+    const remains   = Number(data.remains||0);
+    const delivered = Q - remains;
+    const pct = Q? Math.max(0,Math.min(100,Math.round(delivered/Q*100))) : 0;
+    bar.style.width = pct + "%";
+    out.textContent =
+`Statut: ${data.status}
+Livré: ${delivered}/${Q} (~${pct}%)
+Restant: ${remains}
+Coût: ${data.charge||'—'} ${data.currency||''}
+
+Réponse brute:
+` + JSON.stringify(data,null,2);
+  }catch(err){
+    out.textContent = "Erreur: " + err.message;
+  }
+});
+</script>
+</body></html>
