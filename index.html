@@ -18,6 +18,23 @@
   .muted{opacity:.65;font-size:12px;margin-top:8px;line-height:1.5}
   .notice{margin-top:16px;padding:12px;border-radius:12px;background:#0f1630;border:1px solid #2c3a6b}
   .ok{color:#7df7c5}.warn{color:#ffaa40}.bad{color:#ff6b6b}
+
+  /* --- Feedback de chargement --- */
+  button.loading{position:relative;opacity:.85;pointer-events:none}
+  button.loading::after{
+    content:"";position:absolute;right:10px;top:50%;width:16px;height:16px;margin-top:-8px;
+    border:2px solid #9fb0d8;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Barre indéterminée pendant l’attente */
+  .progress.indeterminate .bar{
+    width:30%!important;animation:indet 1.2s ease-in-out infinite;
+  }
+  @keyframes indet{
+    0%{margin-left:-30%}50%{margin-left:50%}100%{margin-left:120%}
+  }
+  .hint{opacity:.7;font-size:12px;margin-top:6px}
 </style>
 </head>
 <body>
@@ -39,7 +56,8 @@
         </div>
       </form>
 
-      <div class="progress"><div class="bar" id="bar"></div></div>
+      <div class="progress" id="prog"><div class="bar" id="bar"></div></div>
+      <div class="hint" id="hint">—</div>
 
       <div class="grid">
         <div><div class="k">Statut</div><div class="v" id="status">—</div></div>
@@ -68,12 +86,16 @@ let Q = 100000; // ⚠️ quantité totale fixée côté page (modifie ici pour 
 const f = document.getElementById('f');
 const oid = document.getElementById('oid');
 const auto = document.getElementById('auto');
+const prog = document.getElementById('prog');
 const bar = document.getElementById('bar');
 const statusEl = document.getElementById('status');
 const tsEl = document.getElementById('ts');
 const delivEl = document.getElementById('deliv');
 const remEl = document.getElementById('rem');
+const hint = document.getElementById('hint');
+
 let timer = null;
+let slowTimer = null;
 
 async function query(orderId){
   const r = await fetch(WORKER_URL,{
@@ -86,34 +108,76 @@ async function query(orderId){
 }
 function fmt(n){ return Number(n).toLocaleString('fr-FR'); }
 function now(){ return new Date().toLocaleTimeString('fr-FR'); }
-function paintStatus(s){
-  statusEl.classList.remove('ok','warn','bad');
-  if(s==='Terminé') statusEl.classList.add('ok');
-  else if(s==='En attente'||s==='En cours') statusEl.classList.add('warn');
-  else statusEl.classList.add('bad');
-  statusEl.textContent = s || '—';
+
+/* Traduction des statuts API → FR */
+function mapStatus(s){
+  const x = String(s||"").toLowerCase();
+  if(x==="pending") return "En attente";
+  if(x==="in progress" || x==="processing") return "En cours";
+  if(x==="completed" || x==="complete") return "Terminé";
+  if(x==="partial" || x==="partially completed") return "Partielle";
+  if(x==="canceled" || x==="cancelled") return "Annulée";
+  return s || "—";
 }
+
+function paintStatus(sFr){
+  statusEl.classList.remove('ok','warn','bad');
+  if(sFr==='Terminé') statusEl.classList.add('ok');
+  else if(sFr==='En attente' || sFr==='En cours') statusEl.classList.add('warn');
+  else statusEl.classList.add('bad');
+  statusEl.textContent = sFr;
+}
+
+function setLoading(on){
+  const btn = f.querySelector('button[type="submit"]');
+  if(on){
+    btn.classList.add('loading'); btn.textContent = "Vérification…"; btn.disabled = true;
+    hint.textContent = "Requête envoyée…";
+    prog.classList.add('indeterminate');
+    slowTimer = setTimeout(()=>{ hint.textContent = "Connexion lente… toujours en cours ⏳"; }, 1500);
+  }else{
+    btn.classList.remove('loading'); btn.textContent = "Vérifier"; btn.disabled = false;
+    prog.classList.remove('indeterminate');
+    clearTimeout(slowTimer);
+  }
+}
+
 function updateUI(data){
   const remains = Number(data.remains||0);
   const delivered = Math.max(0, Q - remains);
   const pct = Math.max(0, Math.min(100, Math.round(delivered / Q * 100)));
-  paintStatus(data.status||'Unknown');
+
+  const sFr = mapStatus(data.status);
+  paintStatus(sFr);
   tsEl.textContent = now();
   delivEl.textContent = `${fmt(delivered)} / ${fmt(Q)} (~${pct}%)`;
   remEl.textContent = fmt(remains);
   bar.style.width = pct + "%";
+  hint.textContent = "Dernière mise à jour à " + now();
 }
+
 async function runOnce(){
   const orderId = Number(oid.value);
   if(!orderId) return;
-  try{ updateUI(await query(orderId)); }
-  catch(e){ paintStatus('Erreur'); tsEl.textContent = now(); delivEl.textContent='—'; remEl.textContent='—'; bar.style.width='0%'; }
+  setLoading(true);
+  try{
+    const data = await query(orderId);
+    updateUI(data);
+  }catch(e){
+    paintStatus('Erreur'); tsEl.textContent = now();
+    delivEl.textContent='—'; remEl.textContent='—'; bar.style.width='0%';
+    hint.textContent = "Erreur de connexion. Réessayez.";
+  }finally{
+    setLoading(false);
+  }
 }
+
 function handleAuto(){
   if(timer){ clearInterval(timer); timer = null; }
   const sec = Number(auto.value);
   if(sec>0){ timer = setInterval(runOnce, sec*1000); }
 }
+
 f.addEventListener('submit', e=>{ e.preventDefault(); runOnce(); handleAuto(); });
 auto.addEventListener('change', handleAuto);
 
